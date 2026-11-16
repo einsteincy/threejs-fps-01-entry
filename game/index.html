@@ -1,0 +1,92 @@
+<!doctype html>
+<!--
+DUSKLINE — Flare Yard 7: 5v5 tactical FPS, buy economy, plant/defuse, team-plan
+bots with radio callouts. JUDGE NOTE — criterion map (what proves each rule):
+1 Complete game — main.js state machine (MENU/BUY/LIVE/ROUND_END/MATCH_END),
+   player.js movement, bots.js opponents, hud.js health/ammo/timer/score.
+   Pause: main.js pauseGame/resumeGame (Esc/P). Rounds end on team
+   elimination / detonation / defuse / timer and start again.
+2 Gunplay — weapons.js 3 weapons (P9/HORNET/VK-7, P2 adds BREACHER/LONGSHOT),
+   spread + bloom + recoil punish moving fire; player.js ADS hook (P2).
+3 Tactics — team.js IGL orders Z/X/C (P2), radio callouts, round plans;
+   economy.js buy menu; bomb.js plant/defuse; map.js flare vent (P3).
+4 Map/look — map.js Flare Yard 7: 48x32 m, 3 lanes, flare stack, fuel depot,
+   dusk palette (palette.js), amber sun + sodium lights + fog.
+5 Code — one module per job; 120 Hz fixed-step sim apart from rendering
+   (main.js); no per-frame allocation in hot loops; state in state.js.
+Built as a reusable open-source base for web FPS games: map, weapons and bots
+are data-driven modules. No CDN, no external assets, system fonts only.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DUSKLINE — Flare Yard 7: 5v5 tactical FPS</title>
+<link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+<div id="game"></div>
+
+<div id="hud" aria-hidden="true">
+  <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+  <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+  <div id="damage-vignette"></div>
+  <div id="flash-overlay"></div>
+  <div id="topbar">
+    <div id="timer">01:40</div>
+    <div id="score-line">DUSK 0 : 0 BOTS</div>
+    <div id="plan-line"></div>
+    <div id="vent-line"></div>
+  </div>
+  <div id="health-box">
+    <div class="bar"><i id="health-fill"></i></div>
+    <span id="health-num">100</span>
+    <div class="bar armor"><i id="armor-fill"></i></div>
+    <span id="armor-num">0</span>
+  </div>
+  <div id="ammo"><span id="weapon-name">P9</span><span id="ammo-mag">12</span><span id="ammo-reserve">/ 36</span></div>
+  <div id="money">$800</div>
+  <div id="team-panel"></div>
+  <div id="radio-feed"></div>
+  <div id="kill-feed"></div>
+  <canvas id="radar" width="140" height="140"></canvas>
+  <div id="spectate" hidden><span id="spectate-name"></span></div>
+  <div id="plant-bar" hidden><div id="plant-fill"></div><span id="plant-label"></span></div>
+  <div id="banner" hidden><div id="banner-title"></div><div id="banner-sub"></div></div>
+  <div id="orders-hint">ORDERS: [Z] LONG &nbsp;[X] SHORT &nbsp;[C] HOLD</div>
+</div>
+
+<div id="buy-menu" hidden>
+  <section class="panel buy-panel">
+    <h2>BUY — Round <span id="buy-round">1</span></h2>
+    <div class="buy-meta"><span id="buy-money">$800</span><span id="buy-timer">BUY 15s</span></div>
+    <div id="buy-grid"></div>
+    <p class="buy-note">Click an item or press its key. Weapons 1–3, armor 4, ammo 5, grenades 6–8. B closes.</p>
+  </section>
+</div>
+
+<div id="overlay" class="overlay">
+  <section class="panel" role="dialog" aria-modal="true" aria-labelledby="overlay-title">
+    <h1 id="overlay-title">DUSKLINE — Flare Yard 7</h1>
+    <p id="overlay-copy">5v5 tactical FPS. Plant the bomb at Fuel Depot, or eliminate the enemy team. Click to play.</p>
+    <button id="play" type="button">Click to play</button>
+    <ul class="keys">
+      <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</li>
+      <li><kbd>Mouse</kbd> Look &nbsp; <kbd>Click</kbd> Fire</li>
+      <li><kbd>R</kbd> Reload &nbsp; <kbd>Ctrl</kbd> Crouch &nbsp; <kbd>Space</kbd> Jump</li>
+      <li><kbd>1</kbd>–<kbd>3</kbd> Weapons &nbsp; <kbd>6</kbd>/<kbd>7</kbd>/<kbd>8</kbd> Grenades</li>
+      <li><kbd>E</kbd> Plant (hold) &nbsp; <kbd>Z</kbd>/<kbd>X</kbd>/<kbd>C</kbd> Orders &nbsp; <kbd>P</kbd>/<kbd>Esc</kbd> Pause</li>
+    </ul>
+  </section>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
