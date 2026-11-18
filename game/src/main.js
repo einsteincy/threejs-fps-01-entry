@@ -4,20 +4,21 @@
 // criterion map lives at the top of index.html; this file is the entrypoint.
 //
 // 1 complete game -> main.js state machine, player.js, bots.js, hud.js
-// 2 gunplay -> weapons.js (5 weapons P2; 3 in P1), player.js ADS (P2)
-// 3 tactics -> team.js orders/radio/plans, economy.js, bomb.js, map.js vent (P3)
+// 2 gunplay -> weapons.js (5 weapons), player.js ADS, spread/recoil numbers
+// 3 tactics -> team.js orders/radio/plans/playbook, economy.js, bomb.js,
+//    map.js vent (P3)
 // 4 map/look -> map.js Flare Yard 7, flare stack, 3 lanes, dusk palette
 // 5 code -> one module per job, 120 Hz fixed-step sim apart from rendering,
 //    no per-frame allocation in hot loops, state in one object (state.js).
 import * as THREE from 'three';
-import { createMatchState, PHASE, ROUND_END_CAUSE, mulberry32 } from './state.js';
+import { createMatchState, PHASE, ROUND_END_CAUSE, mulberry32, settings } from './state.js';
 import { PALETTE } from './palette.js';
 import { createMap, SITE, PLANT_SPOT, ATTACKER_SPAWNS, DEFENDER_SPAWNS, WAYPOINTS, ROUTES } from './map.js';
 import { WEAPONS, WEAPON_ORDER, createArsenal, createTracers } from './weapons.js';
 import { createPlayer } from './player.js';
 import { createBot, createEnemyTeam, separateBots, BOT_DAMAGE } from './bots.js';
 import { createTeam, planForRound, laneOf, teammateBuy } from './team.js';
-import { createEconomy, PRICES, BUY_MENU } from './economy.js';
+import { createEconomy, PRICES, REWARDS, BUY_MENU } from './economy.js';
 import { createBomb, PLANT_TIME, FUSE_TIME } from './bomb.js';
 import { createGrenades } from './grenades.js';
 import { createHud } from './hud.js';
@@ -183,6 +184,13 @@ function startMatch() {
 function startRound(round) {
   state.round = round;
   state.phase = PHASE.BUY;
+  // A round always starts at hip fire: ADS and the zoomed FOV do not carry
+  // over from the previous round.
+  player.state.ads = false;
+  if (camera.fov !== 74) {
+    camera.fov = 74;
+    camera.updateProjectionMatrix();
+  }
   state.buyTimer = BUY_TIME;
   state.roundTimer = ROUND_TIME;
   state.roundElapsed = 0;
@@ -270,31 +278,42 @@ function buyItem(id) {
 
 function playerShoot() {
   if (!arsenal.fire()) return false;
-  camera.getWorldDirection(direction);
-  const spread = arsenal.spread(player.groundSpeed(), player.state.crouching, !player.state.onGround, player.state.ads ? 0.5 : 1);
-  direction.x += (random() * 2 - 1) * spread;
-  direction.y += (random() * 2 - 1) * spread;
-  direction.z += (random() * 2 - 1) * spread;
-  direction.normalize();
-  scene.updateMatrixWorld(true);
-  raycaster.set(camera.position, direction);
-  const hits = raycaster.intersectObjects(botShootables(), false);
   const def = arsenal.def();
-  let end = tmpVec.copy(camera.position).addScaledVector(direction, 90);
-  if (hits.length) {
-    const hit = hits[0];
-    end = hit.point;
-    const user = hit.object.userData;
-    if (user.bot && user.bot.alive) {
-      const dmg = def[user.part] ?? def.torso;
-      const died = user.bot.damage(dmg, user.part);
-      hud.hitMarker(died, markerHoldMs);
-      if (died) onBotKilled(user.bot, 'YOU', user.part === 'head');
-      tracers.spawn(camera.localToWorld(new THREE.Vector3(0.26, -0.2, -0.9)), end);
+  const adsMul = player.state.ads ? (def.adsSpread ?? 0.5) : 1;
+  const spread = arsenal.spread(player.groundSpeed(), player.state.crouching, !player.state.onGround, adsMul);
+  const pellets = def.pellets ?? 1;
+  let anyHit = false;
+  let anyKill = false;
+  for (let p = 0; p < pellets; p += 1) {
+    camera.getWorldDirection(direction);
+    direction.x += (random() * 2 - 1) * spread;
+    direction.y += (random() * 2 - 1) * spread;
+    direction.z += (random() * 2 - 1) * spread;
+    direction.normalize();
+    scene.updateMatrixWorld(true);
+    raycaster.set(camera.position, direction);
+    const hits = raycaster.intersectObjects(botShootables(), false);
+    const end = tmpVec.copy(camera.position).addScaledVector(direction, 90);
+    if (hits.length) {
+      const hit = hits[0];
+      end.copy(hit.point);
+      const user = hit.object.userData;
+      if (user.bot && user.bot.alive) {
+        const base = def[user.part] ?? def.torso;
+        const dmg = Math.round(base * arsenal.falloff(hit.distance));
+        if (dmg > 0) {
+          const died = user.bot.damage(dmg, user.part);
+          anyHit = true;
+          if (died) {
+            anyKill = true;
+            onBotKilled(user.bot, 'YOU', user.part === 'head');
+          }
+        }
+      }
     }
-  } else {
-    tracers.spawn(camera.localToWorld(new THREE.Vector3(0.26, -0.2, -0.9)), end);
+    tracers.spawn(camera.localToWorld(arsenal.muzzleTip()), end);
   }
+  if (anyHit) hud.hitMarker(anyKill, markerHoldMs);
   const recoil = arsenal.recoil();
   player.recoil(recoil.pitch, (random() * 2 - 1) * recoil.yaw);
   noise(player.state.position.x, player.state.position.z, 38, 2);
@@ -313,18 +332,31 @@ function botShoot(bot, targetPos, spread) {
   tmpVec2.normalize();
   scene.updateMatrixWorld(true);
   raycaster.set(tmpVec, tmpVec2);
+  // A wall blocks the shot only when it is CLOSER than the target: the old
+  // code set blocked on any shootable hit, and the ray always reaches the
+  // ground ~24 m out, so every bot shot was "blocked" and no bot could ever
+  // damage the player or a teammate (found by the P2 smoke test). Compare
+  // distances instead: the nearest of wall / player / teammate / enemy wins.
   const hits = raycaster.intersectObjects(map.shootables, false);
-  let end = tmpVec.clone().addScaledVector(tmpVec2, 60);
-  let blocked = false;
-  if (hits.length) {
-    end = hits[0].point;
-    blocked = true;
-  }
-  // Player box test (only if the wall did not stop the ray first).
+  const wallDist = hits.length ? hits[0].distance : Infinity;
+  // Player box test.
   playerBox.min.set(player.state.position.x - 0.34, player.state.position.y, player.state.position.z - 0.34);
   playerBox.max.set(player.state.position.x + 0.34, player.state.position.y + player.state.height, player.state.position.z + 0.34);
   const pHit = raycaster.ray.intersectBox(playerBox, new THREE.Vector3());
-  if (!blocked && pHit && player.state.alive && bot.side === 'bots') {
+  const pDist = pHit ? pHit.distanceTo(tmpVec) : Infinity;
+  // Enemy bots shooting teammates: the nearer of the player and the first
+  // teammate mesh on the ray takes the hit.
+  const tmHit = bot.side === 'bots'
+    ? raycaster.intersectObjects(duskBots.filter((t) => t.alive).flatMap((t) => t.hitMeshes), false)[0] ?? null
+    : null;
+  const tmDist = tmHit ? tmHit.distance : Infinity;
+  if (tmHit && tmDist < wallDist && tmDist <= pDist) {
+    const user = tmHit.object.userData;
+    const part = user.part;
+    const dmg = part === 'head' ? BOT_DAMAGE.head : part === 'torso' ? BOT_DAMAGE.torso : Math.round(BOT_DAMAGE.torso * 0.75);
+    const died = user.bot.damage(dmg, part);
+    if (died) onBotKilled(user.bot, bot.callsign, part === 'head');
+  } else if (pHit && pDist < wallDist && player.state.alive && bot.side === 'bots') {
     const headshot = pHit.y > player.state.position.y + 1.35;
     player.damage(headshot ? BOT_DAMAGE.head : BOT_DAMAGE.torso);
     hud.damageFlash();
@@ -332,30 +364,54 @@ function botShoot(bot, targetPos, spread) {
     if (!player.state.alive) onPlayerDied(bot);
   }
   // Teammate bots shooting enemies: test enemy part meshes.
-  if (!blocked && bot.side === 'dusk') {
+  let enemyHit = null;
+  if (bot.side === 'dusk') {
     const enemyHits = raycaster.intersectObjects(enemyBots.filter((e) => e.alive).flatMap((e) => e.hitMeshes), false);
     if (enemyHits.length) {
       const user = enemyHits[0].object.userData;
       const part = user.part;
       const dmg = part === 'head' ? 136 : part === 'torso' ? 34 : 26;
-      const died = user.bot.damage(dmg, part);
-      if (died) onBotKilled(user.bot, bot.callsign, part === 'head');
+      if (enemyHits[0].distance < wallDist) {
+        enemyHit = enemyHits[0];
+        const died = user.bot.damage(dmg, part);
+        if (died) onBotKilled(user.bot, bot.callsign, part === 'head');
+      }
     }
   }
+  // Tracer ends at the nearest thing the ray hit (wall, bot, player), else
+  // 60 m out.
+  let end = tmpVec.clone().addScaledVector(tmpVec2, 60);
+  let endDist = 60;
+  if (hits.length && hits[0].distance < endDist) { end = hits[0].point; endDist = hits[0].distance; }
+  if (tmHit && tmDist < endDist) { end = tmHit.point; endDist = tmDist; }
+  if (pHit && pDist < endDist) { end = pHit; endDist = pDist; }
+  if (enemyHit && enemyHit.distance < endDist) { end = enemyHit.point; endDist = enemyHit.distance; }
   tracers.spawn(tmpVec.clone().add(new THREE.Vector3(0.2, 0, -0.5)), end, bot.side === 'bots' ? '#ff7a5c' : PALETTE.amber);
   noise(bot.group.position.x, bot.group.position.z, 30, 1);
 }
 
 function onBotKilled(bot, killer, headshot) {
   hud.killfeed(`${killer} ▸ ${bot.callsign}${headshot ? ' (HEADSHOT)' : ''}`);
-  if (bot.side === 'bots') {
-    economy.reward('kill');
+  // Kill credit (DESIGN.md §13.2: same reward rules for player and
+  // teammates): the killer's money +$300 and kills +1. The player is
+  // credited only for their own kills — a teammate's kill pays the teammate.
+  if (killer === 'YOU') {
     state.kills += 1;
+  } else {
+    const killerBot = allBots.find((b) => b.callsign === killer);
+    if (killerBot) killerBot.kills += 1;
+  }
+  if (bot.side === 'bots') {
     state.roundKills += 1;
-    hud.setMoney(economy.money);
+    if (killer === 'YOU') {
+      economy.reward('kill');
+      hud.setMoney(economy.money);
+    } else {
+      const killerBot = duskBots.find((b) => b.callsign === killer);
+      if (killerBot) killerBot.money += REWARDS.kill;
+    }
     team.radio('kill', { who: killer, x: bot.group.position.x, z: bot.group.position.z, t: state.elapsed });
   } else {
-    bot.money += 0;
     team.radio('death', { who: 'VEX', name: bot.callsign, t: state.elapsed });
     lastDeath = { victim: bot, x: bot.group.position.x, z: bot.group.position.z, t: state.elapsed };
   }
@@ -380,14 +436,26 @@ function onPlayerDied(killer) {
     state.spectating = alive[0];
     hud.setSpectate(alive[0].callsign);
   }
+  // Death releases ADS: the spectate view is always at hip FOV.
+  player.state.ads = false;
+  if (camera.fov !== 74) {
+    camera.fov = 74;
+    camera.updateProjectionMatrix();
+  }
   input.releaseLock();
 }
 
 function onPlanted(who) {
   bomb.plant();
   state.planted = true;
-  economy.reward('plant');
-  if (who === 'player') hud.setMoney(economy.money);
+  // Plant reward goes to the planter (DESIGN.md §13.2): the player or ORIN.
+  if (who === 'player') {
+    economy.reward('plant');
+    hud.setMoney(economy.money);
+  } else {
+    const planter = duskBots.find((b) => b.callsign === who);
+    if (planter) planter.money += REWARDS.plant;
+  }
   team.radio('plantDone', { t: state.elapsed });
   hud.setPlant(null);
 }
@@ -470,9 +538,22 @@ function step(dt) {
   // Noise entries expire after 1 s.
   while (state.noise.length && state.elapsed - state.noise[0].t > 1) state.noise.shift();
 
+  // ADS (DESIGN.md §14.5): right mouse aims — FOV narrows (74 -> 56, DMR
+  // 44), spread x0.5 (DMR x0.3, applied in playerShoot), sensitivity x0.7,
+  // move speed x0.6 (player.js ADS_WALK). Shot modes stage their FOV
+  // directly, so the live ADS never runs while a capture is being staged.
+  if (!shot && player.state.alive && !state.spectating) {
+    player.state.ads = input.state.ads;
+    player.state.speedMul = arsenal.def().moveMul ?? 1;
+    const targetFov = player.state.ads ? (arsenal.def().adsFov ?? 56) : 74;
+    if (Math.abs(camera.fov - targetFov) > 0.01) {
+      camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 10);
+      camera.updateProjectionMatrix();
+    }
+  }
   const look = input.takeLook();
   if (player.state.alive && !state.spectating) {
-    player.look(look.x, look.y, 0.0022 * (player.state.ads ? 0.7 : 1));
+    player.look(look.x, look.y, 0.0022 * settings.sensitivity * (player.state.ads ? 0.7 : 1));
     player.step(dt, input.state.keys);
     if (input.state.firing && arsenal.ready()) playerShoot();
   }
@@ -527,6 +608,7 @@ function step(dt) {
     waypoints: WAYPOINTS,
     coverNodes: [[-2, -6], [14, -2], [-14, 6], [2, 14]],
     bombPlanted: state.planted,
+    bombPos: bomb.planted ? { x: bomb.mesh.position.x, z: bomb.mesh.position.z } : null,
     retakeGo: enemyTeam.retakeGo,
     onShoot: botShoot,
     onSpot: (bot, foe) => {
@@ -597,7 +679,7 @@ function step(dt) {
     },
   });
   tracers.step(dt);
-  arsenal.step(dt);
+  arsenal.step(dt, player.state.ads && !shot);
   map.update(state.elapsed);
 
   hud.setHealth(player.state.health, player.state.armor);
@@ -606,7 +688,7 @@ function step(dt) {
     name: b.callsign, hp: Math.round(b.hp), weapon: b.loadout?.weapon?.toUpperCase() ?? 'P9',
     alive: b.alive, carrier: bomb.carrier === b.callsign,
   })));
-  hud.setCrosshairGap(2 + arsenal.spread(player.groundSpeed(), player.state.crouching, !player.state.onGround) * 900);
+  hud.setCrosshairGap(2 + arsenal.spread(player.groundSpeed(), player.state.crouching, !player.state.onGround, player.state.ads ? (arsenal.def().adsSpread ?? 0.5) : 1) * 900);
   radarTimer -= dt;
   if (radarTimer <= 0) {
     radarTimer = 0.25;
@@ -633,11 +715,23 @@ function handlePressed() {
       continue;
     }
     if (state.paused) continue;
+    // Sensitivity fallback keys (DESIGN.md §15.5): [ ] adjust in 0.1 steps,
+    // clamped to the slider's range; the sliders follow.
+    if (code === 'BracketLeft' || code === 'BracketRight') {
+      settings.sensitivity = Math.max(0.3, Math.min(2.5, settings.sensitivity + (code === 'BracketRight' ? 0.1 : -0.1)));
+      hud.syncSettings(settings);
+      continue;
+    }
     if (state.phase === PHASE.BUY) {
       if (code === 'KeyB') {
         const menu = document.getElementById('buy-menu');
         if (menu) menu.hidden = !menu.hidden;
       }
+      // Orders are issued in BUY as well as LIVE (DESIGN.md §14.3): the
+      // plan is set before the round starts, then executed.
+      if (code === 'KeyZ') team.issueOrder('LONG');
+      if (code === 'KeyX') team.issueOrder('SHORT');
+      if (code === 'KeyC') team.issueOrder('HOLD');
       const item = BUY_MENU.find((m) => `Digit${m.key}` === code || `Numpad${m.key}` === code);
       if (item) buyItem(item.id);
       continue;
@@ -738,7 +832,7 @@ function runShot(name) {
     body.position.set(-4, 0, -12);
     body.yaw = -Math.PI / 2;
     body.pitch = -0.03;
-    camera.fov = 70;
+    camera.fov = 56;
     camera.updateProjectionMatrix();
     state.roundTimer = 92;
     state.phase = PHASE.LIVE;
@@ -787,11 +881,16 @@ function runShot(name) {
     raycaster.set(camera.position, direction);
     const hits = raycaster.intersectObjects(botShootables(), false);
     if (hits.length) {
-      tracers.spawn(camera.localToWorld(new THREE.Vector3(0.26, -0.2, -0.9)), hits[0].point);
+      tracers.spawn(camera.localToWorld(arsenal.muzzleTip()), hits[0].point);
       hud.hitMarker(true, markerHoldMs);
     }
     hud.setCrosshairGap(2);
     settle(1);
+    // Staged ADS'd (DESIGN.md §15.9): FOV 56 is the live ADS value for the
+    // rifle, the viewmodel sits centred, the crosshair is tight (gap 2).
+    // Snapped after the last settle so the live ADS lerp cannot pull it back.
+    player.state.ads = true;
+    arsenal.snapAdsPose(true);
   } else if (name === 'buy') {
     state.round = 2;
     state.scoreDusk = 1;
@@ -860,7 +959,9 @@ function runShot(name) {
     hud.setPlant(0.6, 'PLANTING');
     team.feed.length = 0;
     hud.clearRadio();
-    team.radioLine('ORIN: COVERING PLANT');
+    // Order ack in the radio feed (DESIGN.md §15.9): the plant shot shows
+    // the IGL order being answered, not just a cover callout.
+    team.radioLine('VEX: COPY — LONG');
     drawRadarNow();
     syncCamera();
   } else if (name === 'win') {
@@ -908,6 +1009,8 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+hud.bindSettings(settings);
+
 // Smoke-test + debug hooks (not part of the game): the headless harness reads
 // these, never the player.
 window.__game = {
@@ -927,6 +1030,10 @@ window.__game = {
   setFiring(v) {
     input.state.firing = v;
   },
+  setAds(v) {
+    input.state.ads = v;
+  },
+  settings,
   simAvgMs() {
     return simFrames ? simTimeMs / simFrames : 0;
   },

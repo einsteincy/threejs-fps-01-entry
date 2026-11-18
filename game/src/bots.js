@@ -410,10 +410,15 @@ export function createBot(scene, opts) {
         break;
       }
       case 'DEFUSE': {
-        const site = ctx.site;
-        const d = Math.hypot(site.cx - group.position.x, site.cz - group.position.z);
+        // Defuse the BOMB, not the site centre: the centre is inside the
+        // fuel tank's collider (a bot's probe stops 1.84 m away, past the
+        // 1.2 m channel radius), so targeting the centre could never start
+        // the channel. The bomb sits at the plant spot, 0.5 m from the
+        // tank's south/west faces, which the defuser can reach.
+        const target = ctx.bombPos ?? { x: ctx.site.cx, z: ctx.site.cz };
+        const d = Math.hypot(target.x - group.position.x, target.z - group.position.z);
         if (d > 1.2) {
-          moveToward(dt, site.cx, site.cz, HUNT_SPEED, ctx.colliders);
+          moveToward(dt, target.x, target.z, HUNT_SPEED, ctx.colliders);
         } else {
           bot.defuseProgress += dt / 5;
           if (ctx.onDefuseProgress) ctx.onDefuseProgress(bot.defuseProgress);

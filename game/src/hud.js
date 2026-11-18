@@ -64,6 +64,11 @@ export function createHud() {
     ordersHint: $('orders-hint'),
     vignette: $('damage-vignette'),
     flashOverlay: $('flash-overlay'),
+    settingsBox: $('settings'),
+    setSens: $('set-sens'),
+    setSensVal: $('set-sens-val'),
+    setVol: $('set-vol'),
+    setVolVal: $('set-vol-val'),
   };
   const radarCtx = els.radar ? els.radar.getContext('2d') : null;
   const last = {};
@@ -204,8 +209,39 @@ export function createHud() {
       setText(els.title, 'ovT', text.title);
       setText(els.copy, 'ovC', mode === 'round' || mode === 'end' ? (detail ?? text.copy) : text.copy);
       setText(els.play, 'ovP', text.action);
+      // Settings live on the start and pause overlays only — the round-end
+      // and match-end overlays stay clean.
+      if (els.settingsBox) els.settingsBox.hidden = !(mode === 'start' || mode === 'paused');
       els.overlay.hidden = false;
       els.play?.focus();
+    },
+    // Settings sliders (DESIGN.md §15.5): sensitivity applies immediately
+    // (main.js reads settings.sensitivity every look); volume is stored for
+    // audio.js (P3). [ ] keys call syncSettings to move the sliders.
+    bindSettings(settings) {
+      if (!els.setSens || !els.setVol) return;
+      const sync = () => {
+        els.setSens.value = String(settings.sensitivity);
+        setText(els.setSensVal, 'sVal', settings.sensitivity.toFixed(2));
+        els.setVol.value = String(settings.volume);
+        setText(els.setVolVal, 'vVal', `${Math.round(settings.volume * 100)}%`);
+      };
+      els.setSens.addEventListener('input', () => {
+        settings.sensitivity = Number.parseFloat(els.setSens.value);
+        sync();
+      });
+      els.setVol.addEventListener('input', () => {
+        settings.volume = Number.parseFloat(els.setVol.value);
+        sync();
+      });
+      sync();
+    },
+    syncSettings(settings) {
+      if (!els.setSens || !els.setVol) return;
+      els.setSens.value = String(settings.sensitivity);
+      setText(els.setSensVal, 'sVal', settings.sensitivity.toFixed(2));
+      els.setVol.value = String(settings.volume);
+      setText(els.setVolVal, 'vVal', `${Math.round(settings.volume * 100)}%`);
     },
     hideOverlay() {
       if (els.overlay) els.overlay.hidden = true;

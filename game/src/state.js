@@ -16,6 +16,16 @@ export const ROUND_END_CAUSE = {
   TIME: 'time',
 };
 
+// Player settings (DESIGN.md §15.5, P2): in-memory only, no localStorage —
+// the game runs from static files and the review is a single session. The
+// sensitivity slider applies immediately; volume is consumed by audio.js
+// (P3). Deliberately outside createMatchState so a round reset never wipes
+// the reviewer's settings.
+export const settings = {
+  sensitivity: 1,
+  volume: 1,
+};
+
 export function createMatchState() {
   const state = {
     phase: PHASE.MENU,

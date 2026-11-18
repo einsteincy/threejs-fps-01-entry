@@ -29,6 +29,7 @@ export function createPlayer(colliders, onNoise) {
     onGround: true,
     crouching: false,
     ads: false,
+    speedMul: 1,
     health: 100,
     armor: 0,
     alive: true,
@@ -90,7 +91,7 @@ export function createPlayer(colliders, onNoise) {
       const c = Math.cos(body.yaw);
       wish.set(-s * fwd + c * strafe, 0, -c * fwd - s * strafe).normalize();
     }
-    const top = body.crouching ? CROUCH_WALK : body.ads ? ADS_WALK : WALK;
+    const top = (body.crouching ? CROUCH_WALK : body.ads ? ADS_WALK : WALK) * (body.speedMul ?? 1);
     const blend = Math.min(1, ((body.onGround ? GROUND_ACCEL : AIR_ACCEL) * dt) / top);
     body.velocity.x += (wish.x * top - body.velocity.x) * blend;
     body.velocity.z += (wish.z * top - body.velocity.z) * blend;
@@ -161,6 +162,7 @@ export function createPlayer(colliders, onNoise) {
       body.onGround = true;
       body.crouching = false;
       body.ads = false;
+      body.speedMul = 1;
       body.health = 100;
       body.armor = 0;
       body.alive = true;
