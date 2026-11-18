@@ -6,10 +6,12 @@ bots with radio callouts. JUDGE NOTE — criterion map (what proves each rule):
    player.js movement, bots.js opponents, hud.js health/ammo/timer/score.
    Pause: main.js pauseGame/resumeGame (Esc/P). Rounds end on team
    elimination / detonation / defuse / timer and start again.
-2 Gunplay — weapons.js 3 weapons (P9/HORNET/VK-7, P2 adds BREACHER/LONGSHOT),
-   spread + bloom + recoil punish moving fire; player.js ADS hook (P2).
-3 Tactics — team.js IGL orders Z/X/C (P2), radio callouts, round plans;
-   economy.js buy menu; bomb.js plant/defuse; map.js flare vent (P3).
+2 Gunplay — weapons.js 5 weapons (P9/HORNET/VK-7/BREACHER/LONGSHOT),
+   spread + bloom + recoil punish moving fire; player.js ADS (right mouse:
+   FOV 74->56, DMR 44; spread x0.5, DMR x0.3; sensitivity x0.7).
+3 Tactics — team.js IGL orders Z/X/C, radio callouts, round plans, named
+   playbook (LONG/SHORT/SPLIT/HOLD-SAVE/RETAKE); economy.js buy menu;
+   bomb.js plant/defuse; map.js flare vent (P3).
 4 Map/look — map.js Flare Yard 7: 48x32 m, 3 lanes, flare stack, fuel depot,
    dusk palette (palette.js), amber sun + sodium lights + fog.
 5 Code — one module per job; 120 Hz fixed-step sim apart from rendering
@@ -61,7 +63,7 @@ are data-driven modules. No CDN, no external assets, system fonts only.
     <h2>BUY — Round <span id="buy-round">1</span></h2>
     <div class="buy-meta"><span id="buy-money">$800</span><span id="buy-timer">BUY 15s</span></div>
     <div id="buy-grid"></div>
-    <p class="buy-note">Click an item or press its key. Weapons 1–3, armor 4, ammo 5, grenades 6–8. B closes.</p>
+    <p class="buy-note">Click an item or press its key. Weapons 1–5, armor 9, ammo 0, grenades 6–8. B closes.</p>
   </section>
 </div>
 
@@ -70,12 +72,17 @@ are data-driven modules. No CDN, no external assets, system fonts only.
     <h1 id="overlay-title">DUSKLINE — Flare Yard 7</h1>
     <p id="overlay-copy">5v5 tactical FPS. Plant the bomb at Fuel Depot, or eliminate the enemy team. Click to play.</p>
     <button id="play" type="button">Click to play</button>
+    <div id="settings">
+      <label>Sensitivity <input id="set-sens" type="range" min="0.3" max="2.5" step="0.05" value="1"> <span id="set-sens-val">1.00</span></label>
+      <label>Volume <input id="set-vol" type="range" min="0" max="1" step="0.05" value="1"> <span id="set-vol-val">100%</span></label>
+    </div>
     <ul class="keys">
       <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</li>
-      <li><kbd>Mouse</kbd> Look &nbsp; <kbd>Click</kbd> Fire</li>
+      <li><kbd>Mouse</kbd> Look &nbsp; <kbd>Click</kbd> Fire &nbsp; <kbd>Right-click</kbd> ADS</li>
       <li><kbd>R</kbd> Reload &nbsp; <kbd>Ctrl</kbd> Crouch &nbsp; <kbd>Space</kbd> Jump</li>
-      <li><kbd>1</kbd>–<kbd>3</kbd> Weapons &nbsp; <kbd>6</kbd>/<kbd>7</kbd>/<kbd>8</kbd> Grenades</li>
+      <li><kbd>1</kbd>–<kbd>5</kbd> Weapons &nbsp; <kbd>6</kbd>/<kbd>7</kbd>/<kbd>8</kbd> Grenades</li>
       <li><kbd>E</kbd> Plant (hold) &nbsp; <kbd>Z</kbd>/<kbd>X</kbd>/<kbd>C</kbd> Orders &nbsp; <kbd>P</kbd>/<kbd>Esc</kbd> Pause</li>
+      <li><kbd>[</kbd> <kbd>]</kbd> Sensitivity &nbsp; <kbd>M</kbd> Mute</li>
     </ul>
   </section>
 </div>
